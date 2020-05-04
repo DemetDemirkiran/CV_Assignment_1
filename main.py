@@ -3,8 +3,6 @@ import cv2
 from matplotlib import pyplot as plt
 from matplotlib.patches import Circle
 from PIL import Image
-import os
-from skimage import io, feature
 from scipy.spatial import distance as spdis
 from tqdm import tqdm
 from random import sample
@@ -12,25 +10,19 @@ import math
 
 
 def cornerHarris(image, threshold, k=9, first = True):
-    image = cv2.imread(image)
-    #image = cv2.resize(image, (800, 800), interpolation=cv2.INTER_AREA)
-    # if first:
-    #     image = image[:, :600, :]
-    # else:
-    #     image = image[:, 200:, :]
 
+    image = cv2.imread(image)
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    # gray = np.float32(gray)
 
     mask_offset = int(np.floor(k / 2))
     padded_image = cv2.copyMakeBorder(image, mask_offset, mask_offset, mask_offset, mask_offset, cv2.BORDER_CONSTANT)
-    # sift = cv2.xfeatures2d.SIFT_create()
-    # kp, des = sift.detect(gray)
+
     # Harris corner
     dest = cv2.cornerHarris(gray, k, 5, 0.05)
 
     # Reverting back to the original image, with optimal threshold value,  threshold = 0.4
     corner_indices = np.nonzero(dest > threshold * dest.max())
+
     if len(corner_indices[0]) <= 3500:
         fig, ax = plt.subplots(1, 1)
         ax.imshow(image)
@@ -48,6 +40,7 @@ def cornerHarris(image, threshold, k=9, first = True):
 
 
         #plt.show()
+        
     else:
         # print(len(corner_indices[0]))
         # fig, ax = plt.subplots(1, 1)
@@ -58,12 +51,9 @@ def cornerHarris(image, threshold, k=9, first = True):
         for (x, y) in zip(corner_indices[0], corner_indices[1]):
             # circ = Circle((x, y), edgecolor='red')
             # ax.add_patch(circ)
-
             desc = np.reshape(padded_image[x-mask_offset:x + mask_offset + 1,
                               y - mask_offset:y + mask_offset + 1], -1)
             final.append((x, y, desc))
-
-            # final[x::3, y::3] = np.swapaxes(im1.reshape(rows / 3, 3, cols / 3, -1), 1, 2)
 
         # plt.show()
 
@@ -123,9 +113,6 @@ def fundamentalMatrix_Error(matches, fund_matrix, threshold=10):
         desc1_y, desc1_x = matchA
         desc2_y, desc2_x = matchB
 
-        #error += (fund_matrix[0, 0] * desc1_x + fund_matrix[0, 1] * desc1_y + fund_matrix[0, 2] - desc2_x ) ** 2 + \
-                 #(fund_matrix[1, 0] * desc1_x + fund_matrix[1, 1] * desc1_y + fund_matrix[1, 2] - desc2_y) ** 2
-
         homo_a = np.expand_dims(np.hstack((matchA, 1)), axis=1)
         homo_b = np.expand_dims(np.hstack((matchB, 1)), axis=1)
         sample_error = homo_b - np.dot(fund_matrix, homo_a)
@@ -176,26 +163,6 @@ def fundamentalMatrix(matches):
         eq_result[4, 0] += desc2_y * desc1_y
         eq_result[5, 0] += desc2_y
 
-
-        # if fundamental_matrix is not None:
-        #     fundamental_matrix = np.concatenate((fundamental_matrix, np.array([[desc1_x * desc2_x,
-        #                                                                         desc1_x * desc1_y,
-        #                                                                         desc1_x,
-        #                                                                         desc2_x * desc1_y,
-        #                                                                         desc1_y * desc2_y,
-        #                                                                         desc1_y,
-        #                                                                         desc2_x,
-        #                                                                         desc2_y, 1]])), axis=0)
-        # else:
-        #     fundamental_matrix = np.array([[desc1_x * desc2_x,
-        #                                     desc1_x * desc1_y,
-        #                                     desc1_x,
-        #                                     desc2_x * desc1_y,
-        #                                     desc1_y * desc2_y,
-        #                                     desc1_y,
-        #                                     desc2_x,
-        #                                     desc2_y, 1]])
-
     affine_unknown = np.linalg.lstsq(fund_mat, eq_result)
     fund_matrix = np.reshape(affine_unknown[0], (2, 3))
     fund_matrix = np.vstack((fund_matrix, [0, 0, 1]))
@@ -241,11 +208,8 @@ def crop(image):
 def stitching(best_model, inliers, image1, image2):
 
     image1 = cv2.imread(image1)
-    #image1 = cv2.cvtColor(image1, cv2.COLOR_BGR2GRAY)
     image2 = cv2.imread(image2)
-    #img2 = cv2.warpPerspective(image2, best_model, ( image2.shape[1], image1.shape[0]))
-    #img2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
-    #img1 = cv2.warpPerspective(image1, best_model, (image1.shape[1] + image2.shape[1], image1.shape[0]))
+
     # Apply panorama correction
     height = image2.shape[0] + image1.shape[0]
     width = image2.shape[1] + image1.shape[1]
