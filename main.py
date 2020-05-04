@@ -1,9 +1,7 @@
-from turtle import fillcolor
-
 import numpy as np
 import cv2
 from matplotlib import pyplot as plt
-from matplotlib.patches import Circle, Rectangle
+from matplotlib.patches import Circle
 from PIL import Image
 import os
 from skimage import io, feature
@@ -47,9 +45,9 @@ def cornerHarris(image, threshold, k=9, first = True):
             desc = padded_image[x-mask_offset:x + mask_offset + 1, y - mask_offset:y + mask_offset + 1]
             final.append((x, y, desc))
 
-            # final[x::3, y::3] = np.swapaxes(im1.reshape(rows / 3, 3, cols / 3, -1), 1, 2)
 
-        # plt.show()
+
+        #plt.show()
     else:
         # print(len(corner_indices[0]))
         # fig, ax = plt.subplots(1, 1)
@@ -68,10 +66,12 @@ def cornerHarris(image, threshold, k=9, first = True):
             # final[x::3, y::3] = np.swapaxes(im1.reshape(rows / 3, 3, cols / 3, -1), 1, 2)
 
         # plt.show()
+
     return np.array(final)
 
 
 def computeDistances(desc1, desc2, ncc=False):
+
     if ncc:
         distances = np.zeros((len(desc1), len(desc2)))
         for index1, (x1, y1, i) in enumerate(tqdm(desc1)):
@@ -88,12 +88,14 @@ def computeDistances(desc1, desc2, ncc=False):
 
         distances = np.zeros((len(desc1), len(desc2)))
         distances = spdis.cdist(np.stack(aux / norm1), np.stack(aux2 / norm2), 'euclidean')
+
     return distances
 
 
 def matchAnalysis(dist, desc1, desc2, ncc=False):
+
     row_matches = list()
-    # coloumn_matches = list()
+
     if not ncc:
         for i, x in enumerate(tqdm(dist)):
             minx = np.argmin(x)
@@ -107,6 +109,7 @@ def matchAnalysis(dist, desc1, desc2, ncc=False):
             maxx = np.argmax(dist[:, maxy])
             if maxx == i:
                 row_matches.append([desc1[i][:2], desc2[maxy][:2], dist[i, maxy]])
+
     return row_matches
 
 
@@ -120,18 +123,19 @@ def fundamentalMatrix_Error(matches, fund_matrix, threshold=10):
         desc1_y, desc1_x = matchA
         desc2_y, desc2_x = matchB
 
-        error += (fund_matrix[0, 0] * desc1_x + fund_matrix[0, 1] * desc1_y + fund_matrix[0, 2] - desc2_x ) ** 2 + \
-                 (fund_matrix[1, 0] * desc1_x + fund_matrix[1, 1] * desc1_y + fund_matrix[1, 2] - desc2_y) ** 2
+        #error += (fund_matrix[0, 0] * desc1_x + fund_matrix[0, 1] * desc1_y + fund_matrix[0, 2] - desc2_x ) ** 2 + \
+                 #(fund_matrix[1, 0] * desc1_x + fund_matrix[1, 1] * desc1_y + fund_matrix[1, 2] - desc2_y) ** 2
 
         homo_a = np.expand_dims(np.hstack((matchA, 1)), axis=1)
         homo_b = np.expand_dims(np.hstack((matchB, 1)), axis=1)
         sample_error = homo_b - np.dot(fund_matrix, homo_a)
         sample_error = math.hypot(sample_error[0], sample_error[1])
+        error += sample_error
+
         if -threshold < sample_error < threshold:
             inliers.append((matchA, matchB, error))
 
     return inliers, len(inliers), error
-
 
 
 def fundamentalMatrix(matches):
@@ -154,9 +158,6 @@ def fundamentalMatrix(matches):
         fund_mat[2, 0] += desc1_x
         fund_mat[2, 1] += desc1_y
         fund_mat[2, 2] += 1
-        # fund_mat[0, 3], fund_mat[0, 4], fund_mat[0, 5] = 0
-        # fund_mat[1, 3], fund_mat[1, 4], fund_mat[1, 5] = 0
-        # fund_mat[2, 3], fund_mat[2, 4], fund_mat[2, 5] = 0
 
         fund_mat[3, 3] += desc1_x * desc1_x
         fund_mat[3, 4] += desc1_x * desc1_y
@@ -167,9 +168,6 @@ def fundamentalMatrix(matches):
         fund_mat[5, 3] += desc1_x
         fund_mat[5, 4] += desc1_y
         fund_mat[5, 5] += 1
-        # fund_mat[3, 0], fund_mat[3, 1], fund_mat[3, 2] = 0
-        # fund_mat[4, 0], fund_mat[4, 1], fund_mat[4, 2] = 0
-        # fund_mat[5, 0], fund_mat[5, 1], fund_mat[5, 2] = 0
 
         eq_result[0, 0] += desc2_x * desc1_x
         eq_result[1, 0] += desc2_x * desc1_y
@@ -177,7 +175,6 @@ def fundamentalMatrix(matches):
         eq_result[3, 0] += desc2_y * desc1_x
         eq_result[4, 0] += desc2_y * desc1_y
         eq_result[5, 0] += desc2_y
-
 
 
         # if fundamental_matrix is not None:
@@ -198,9 +195,10 @@ def fundamentalMatrix(matches):
         #                                     desc1_y,
         #                                     desc2_x,
         #                                     desc2_y, 1]])
+
     affine_unknown = np.linalg.lstsq(fund_mat, eq_result)
-    fund_matrix = np.reshape(affine_unknown[0], (2,3))
-    fund_matrix = np.vstack( (fund_matrix, [0, 0, 1]) )
+    fund_matrix = np.reshape(affine_unknown[0], (2, 3))
+    fund_matrix = np.vstack((fund_matrix, [0, 0, 1]))
 
     return fund_matrix
 
@@ -221,7 +219,24 @@ def ransac(matches, threshold=5):
             best_model['model'] = fund_matrix
             best_model['error'] = error
 
-    return best_model['model'], np.array([f[0] for f in best_model['inliers']])
+    return best_model['model'], np.array([f[0] for f in best_model['inliers']]), best_model['error']
+
+def crop(image):
+
+    #crop top
+    if not np.sum(image[0]):
+        return crop(image[1:])
+    #crop top
+    if not np.sum(image[-1]):
+        return crop(image[:-2])
+    #crop top
+    if not np.sum(image[:, 0]):
+        return crop(image[:, 1:])
+    #crop top
+    if not np.sum(image[:, -1]):
+        return crop(image[:, :-2])
+
+    return image
 
 def stitching(best_model, inliers, image1, image2):
 
@@ -246,7 +261,7 @@ def stitching(best_model, inliers, image1, image2):
 
     plt.close('all')
     plt.figure(figsize=(10, 8))
-    plt.imshow(result)
+    plt.imshow( crop(result) )
     plt.axis('off')
     plt.show()
 
@@ -256,12 +271,13 @@ def stitching(best_model, inliers, image1, image2):
 
 
 if __name__ == '__main__':
-    img1_path = 'crop4.jpg'#'/home/demet/Desktop/000/000000_pitch1_yaw2.jpg'
-    img2_path = 'crop3.jpg'#'/home/demet/Desktop/000/000000_pitch1_yaw3.jpg'
+    img1_path = '/home/demet/Desktop/000/000000_pitch1_yaw3.jpg'
+    img2_path = '/home/demet/Desktop/000/000000_pitch1_yaw2.jpg'
     desc1 = cornerHarris(img1_path, 0.2)
     desc2 = cornerHarris(img2_path, 0.2)
     dist = computeDistances(desc1, desc2, True)
     matches = matchAnalysis(dist, desc1, desc2, True)
-    best_model, inliers_img_a = ransac(matches, 5.5)
+    best_model, inliers_img_a, error = ransac(matches, 5.5)
     stitched_img = stitching(best_model, inliers_img_a, img1_path, img2_path)
+
     ...
