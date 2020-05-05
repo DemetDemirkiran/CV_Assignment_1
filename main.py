@@ -7,15 +7,24 @@ from scipy.spatial import distance as spdis
 from tqdm import tqdm
 from random import sample
 import math
+from cv2 import KeyPoint
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--image1', type=str, help='path to image 1')
+parser.add_argument('--image2', type=str, help='path to image 2')
+parser.add_argument('--threshold', type=float, help='harris threshold', default=0.2)
+parser.add_argument('--mask', type=int, help='size of descriptor mask', default=9)
+parser.add_argument('--thresholdransac', type=float, help='ransac threshold', default=0.5)
+parser.add_argument('--nmatches', type=int, help='number of matches', default=300)
+parser.add_argument('--ncc', action='store_true', help='ncc or not')
 
-
-def cornerHarris(image, threshold, k=9, first = True):
+def cornerHarris(image, threshold, k):
 
     image = cv2.imread(image)
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
     mask_offset = int(np.floor(k / 2))
-    padded_image = cv2.copyMakeBorder(image, mask_offset, mask_offset, mask_offset, mask_offset, cv2.BORDER_CONSTANT)
+    padded_image = cv2.copyMakeBorder(gray, mask_offset, mask_offset, mask_offset, mask_offset, cv2.BORDER_CONSTANT)
 
     # Harris corner
     dest = cv2.cornerHarris(gray, k, 5, 0.05)
@@ -35,30 +44,42 @@ def cornerHarris(image, threshold, k=9, first = True):
             x+=mask_offset
             y+=mask_offset
             desc = padded_image[x-mask_offset:x + mask_offset + 1, y - mask_offset:y + mask_offset + 1]
-            final.append((x, y, desc))
+            final.append((x, y, np.reshape(desc, -1)))
 
 
 
-        #plt.show()
-        
+        plt.show()
+
     else:
         # print(len(corner_indices[0]))
-        # fig, ax = plt.subplots(1, 1)
-        # ax.imshow(image)
+        fig, ax = plt.subplots(1, 1)
+        ax.imshow(image)
         rows, cols, _ = image.shape
         final = []
 
         for (x, y) in zip(corner_indices[0], corner_indices[1]):
-            # circ = Circle((x, y), edgecolor='red')
-            # ax.add_patch(circ)
-            desc = np.reshape(padded_image[x-mask_offset:x + mask_offset + 1,
-                              y - mask_offset:y + mask_offset + 1], -1)
-            final.append((x, y, desc))
+            circ = Circle((x, y), edgecolor='red')
+            ax.add_patch(circ)
+            x+=mask_offset
+            y+=mask_offset
+            desc = padded_image[x-mask_offset:x + mask_offset + 1,
+                              y - mask_offset:y + mask_offset + 1]
+            final.append((x, y, np.reshape(desc, -1)))
 
-        # plt.show()
+        plt.show()
 
     return np.array(final)
 
+def extractSIFT(img , desc):
+
+    image = cv2.imread(img)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    sift = cv2.xfeatures2d.SIFT_create()
+    kp = KeyPoint()
+    new_kps = kp.convert(desc[0:, :2])
+    desc2 = sift.compute(gray, new_kps)
+
+    return None
 
 def computeDistances(desc1, desc2, ncc=False):
 
@@ -82,25 +103,27 @@ def computeDistances(desc1, desc2, ncc=False):
     return distances
 
 
-def matchAnalysis(dist, desc1, desc2, ncc=False):
+def matchAnalysis(dist, desc1, desc2, ncc=False, max_count=3):
 
     row_matches = list()
-
+    #Euclidean
     if not ncc:
         for i, x in enumerate(tqdm(dist)):
             minx = np.argmin(x)
             miny = np.argmin(dist[:, minx])
             if miny == i:
                 row_matches.append([desc1[i][:2], desc2[minx][:2], dist[i, minx]])
-
+        indices = np.argsort(np.array(row_matches)[:, 2])
+    #NCC
     else:
         for i, x in enumerate(tqdm(dist)):
             maxy = np.argmax(x)
             maxx = np.argmax(dist[:, maxy])
             if maxx == i:
                 row_matches.append([desc1[i][:2], desc2[maxy][:2], dist[i, maxy]])
+        indices = np.argsort(-np.array(row_matches)[:, 2])
 
-    return row_matches
+    return np.array(row_matches)[indices[:max_count]]
 
 
 def fundamentalMatrix_Error(matches, fund_matrix, threshold=10):
@@ -113,8 +136,8 @@ def fundamentalMatrix_Error(matches, fund_matrix, threshold=10):
         desc1_y, desc1_x = matchA
         desc2_y, desc2_x = matchB
 
-        homo_a = np.expand_dims(np.hstack((matchA, 1)), axis=1)
-        homo_b = np.expand_dims(np.hstack((matchB, 1)), axis=1)
+        homo_a = np.expand_dims(np.hstack((desc1_x, desc1_y, 1)), axis=1)
+        homo_b = np.expand_dims(np.hstack((desc2_x, desc2_y, 1)), axis=1)
         sample_error = homo_b - np.dot(fund_matrix, homo_a)
         sample_error = math.hypot(sample_error[0], sample_error[1])
         error += sample_error
@@ -171,7 +194,7 @@ def fundamentalMatrix(matches):
 
 def ransac(matches, threshold=5):
 
-    iterations = 200
+    iterations = 1000
     matches = np.array(matches)
     best_model = {'count': -1, 'model': None, 'inliers': None, 'error':-1}
 
@@ -186,20 +209,19 @@ def ransac(matches, threshold=5):
             best_model['model'] = fund_matrix
             best_model['error'] = error
 
-    return best_model['model'], np.array([f[0] for f in best_model['inliers']]), best_model['error']
+    return best_model['model'], best_model['inliers'], best_model['error']
 
 def crop(image):
 
-    #crop top
     if not np.sum(image[0]):
         return crop(image[1:])
-    #crop top
+
     if not np.sum(image[-1]):
         return crop(image[:-2])
-    #crop top
+
     if not np.sum(image[:, 0]):
         return crop(image[:, 1:])
-    #crop top
+
     if not np.sum(image[:, -1]):
         return crop(image[:, :-2])
 
@@ -214,18 +236,23 @@ def stitching(best_model, inliers, image1, image2):
     height = image2.shape[0] + image1.shape[0]
     width = image2.shape[1] + image1.shape[1]
 
-    if best_model[0, 2] < 0:
-        best_model[0, 2] = -best_model[0, 2]
-        result = cv2.warpPerspective(image2, best_model, (height, width))
-        result[:image1.shape[0], :image1.shape[1]] = image1
-    else:
-        result = cv2.warpPerspective(image1, best_model, (height, width))
-        result[:image1.shape[0], :image1.shape[1]] = image2
+    #if best_model[0, 2] < 0:
+    best_model[0, 2] = -best_model[0, 2] if best_model[0,2] < 0 else best_model[0,2]
+    best_model[1, 2] = -best_model[1, 2] if best_model[1,2] < 0 else best_model[1,2]
+    result = cv2.warpPerspective(image2, best_model, (height, width))
+    result[:image1.shape[0], :image1.shape[1]] = image1
+    #else:
+    #    result = cv2.warpPerspective(image1, best_model, (height, width))
+    #    result[:image1.shape[0], :image1.shape[1]] = image2
 
 
     plt.close('all')
     plt.figure(figsize=(10, 8))
-    plt.imshow( crop(result) )
+    result = cv2.cvtColor(result, cv2.COLOR_BGR2RGB)
+    try:
+        plt.imshow( crop(result) )
+    except:
+        plt.imshow(result)
     plt.axis('off')
     plt.show()
 
@@ -235,13 +262,15 @@ def stitching(best_model, inliers, image1, image2):
 
 
 if __name__ == '__main__':
-    img1_path = '/home/demet/Desktop/000/000000_pitch1_yaw3.jpg'
-    img2_path = '/home/demet/Desktop/000/000000_pitch1_yaw2.jpg'
-    desc1 = cornerHarris(img1_path, 0.2)
-    desc2 = cornerHarris(img2_path, 0.2)
-    dist = computeDistances(desc1, desc2, True)
-    matches = matchAnalysis(dist, desc1, desc2, True)
-    best_model, inliers_img_a, error = ransac(matches, 5.5)
-    stitched_img = stitching(best_model, inliers_img_a, img1_path, img2_path)
+    img1_path = 'l1.png'
+    img2_path = 'l2.png'
+    args = parser.parse_args()
+    desc1 = cornerHarris(args.image1, args.threshold, args.mask)
+    desc2 = cornerHarris(args.image2, args.threshold, args.mask)
+    dist = computeDistances(desc1, desc2, args.ncc)
+    matches = matchAnalysis(dist, desc1, desc2, args.ncc, args.nmatches)
+    best_model, inliers_img_a, error = ransac(matches, args.thresholdransac)
+    print(len(inliers_img_a), error)
+    stitched_img = stitching(best_model, inliers_img_a, args.image1, args.image2)
 
     ...
